@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>TRONCHE de Cake</title>
+<style>
+  :root{
+    --hp-p1: #ff4d4d;
+    --hp-p2: #4d9fff;
+  }
+  html,body{
+    margin:0; padding:0; background:#0a0a0f; color:#eee;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    min-height:100vh;
+  }
+  #wrap{
+    width:100%; max-width:960px; margin:0 auto;
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    min-height:100vh;
+  }
+
+  /* ---------- ECRAN D'ACCUEIL ---------- */
+  #titleScreen{
+    position:fixed; inset:0; z-index:50;
+    background:#0a0a0f radial-gradient(circle at 50% 30%, #3a1000 0%, #0a0a0f 70%) center/cover no-repeat;
+    display:flex; align-items:flex-end; justify-content:center;
+    cursor:pointer;
+  }
+  #titleContent{
+    text-align:center; padding-bottom:9vh; color:#fff;
+  }
+  #titleContent h1{
+    font-size:clamp(30px,8vw,70px); letter-spacing:3px; margin:0 0 12px;
+    font-weight:900; color:#ffd23f;
+    text-shadow:0 0 12px #ff3d00, 0 0 45px #ff3d00, 0 0 2px #000;
+  }
+  #titleContent p{
+    font-size:15px; opacity:.85; letter-spacing:1px;
+    animation: pulseText 1.4s ease-in-out infinite;
+  }
+  @keyframes pulseText{ 0%,100%{opacity:.45;} 50%{opacity:1;} }
+
+  /* ---------- ARENE ---------- */
+  #arena{
+    position:relative;
+    width:100%;
+    aspect-ratio: 16/9;
+    background:#333 center/cover no-repeat;
+    overflow:hidden;
+    border:3px solid #222;
+    border-radius:6px;
+    box-shadow:0 10px 40px rgba(0,0,0,.6);
+  }
+  #arena.decor-missing{ background:linear-gradient(#3a3f55,#1c1e2b); }
+  .decor-missing-msg{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#8892b0; font-size:14px; text-align:center; padding:20px; pointer-events:none;
+  }
+  #arena.shake{ animation: shakeArena .35s linear; }
+  @keyframes shakeArena{
+    0%,100%{ transform:translate(0,0); }
+    20%{ transform:translate(-6px,3px); }
+    40%{ transform:translate(6px,-3px); }
+    60%{ transform:translate(-4px,2px); }
+    80%{ transform:translate(4px,-2px); }
+  }
+
+  .fighter{
+    position:absolute; bottom:6%; width:22%; max-width:220px;
+    image-rendering:pixelated; transition: filter .1s;
+    user-select:none; -webkit-user-drag:none;
+  }
+  .fighter img{ width:100%; display:block; pointer-events:none; }
+  .fighter.facing-left{ transform: scaleX(-1); }
+  .fighter.hit img{ filter:brightness(2) saturate(0) contrast(1.5); }
+  .fighter.ko img{ opacity:.55; filter:grayscale(1); }
+  #p1{ left:6%; }
+  #p2{ right:6%; }
+
+  /* ---------- EFFETS SPECIAUX ---------- */
+  .fx-tornado{
+    position:absolute; width:34%; max-width:190px; aspect-ratio:2/3;
+    background: conic-gradient(from 0deg, rgba(255,255,255,0) 0%, rgba(230,230,230,.5) 30%, rgba(255,255,255,0) 55%, rgba(230,230,230,.4) 80%, rgba(255,255,255,0) 100%);
+    border-radius:50%; filter: blur(3px); mix-blend-mode:screen; pointer-events:none;
+    animation: tornadoSpin .5s linear infinite, tornadoFade .9s ease-out forwards;
+  }
+  @keyframes tornadoSpin{ from{ transform:rotate(0deg) scaleY(1.5);} to{ transform:rotate(360deg) scaleY(1.5);} }
+  @keyframes tornadoFade{ 0%{opacity:0;} 15%{opacity:1;} 80%{opacity:1;} 100%{opacity:0;} }
+
+  .fx-muzzle{
+    position:absolute; width:9%; max-width:60px; aspect-ratio:1/1;
+    background: radial-gradient(circle, #fff8d0 0%, #ffd24d 35%, rgba(255,140,0,0) 72%);
+    border-radius:50%; pointer-events:none;
+    animation: flashPulse .3s ease-out 1;
+  }
+  @keyframes flashPulse{ 0%{opacity:0; transform:scale(.4);} 40%{opacity:1; transform:scale(1.25);} 100%{opacity:0; transform:scale(.7);} }
+
+  .fx-bullet{
+    position:absolute; height:3px; border-radius:2px; pointer-events:none;
+    background:linear-gradient(90deg, rgba(255,255,180,0), #fff6c9 60%, rgba(255,255,180,0));
+    animation: bulletFly .16s linear forwards;
+    box-shadow:0 0 6px 1px #ffe98a;
+  }
+  @keyframes bulletFly{ from{opacity:1;} to{opacity:.2;} }
+
+  .fx-spark{
+    position:absolute; width:12%; max-width:80px; aspect-ratio:1/1;
+    background: radial-gradient(circle, #fff 0%, #ffdb4d 25%, rgba(255,80,0,0) 72%);
+    border-radius:50%; pointer-events:none;
+    animation: sparkBurst .35s ease-out forwards;
+  }
+  @keyframes sparkBurst{ 0%{opacity:0; transform:scale(.2);} 40%{opacity:1; transform:scale(1);} 100%{opacity:0; transform:scale(1.5);} }
+
+  /* ---------- HUD ---------- */
+  #hud{ display:flex; align-items:center; gap:12px; padding:8px 4px 12px; width:100%; box-sizing:border-box; }
+  .hpbox{ flex:1; }
+  .hpbox .name{ font-size:13px; margin-bottom:3px; opacity:.85; }
+  .hpbar-outer{ height:16px; background:#111; border:2px solid #555; border-radius:3px; overflow:hidden; }
+  .hpbar-inner{ height:100%; width:100%; transition: width .25s ease-out; }
+  #p1hp{ background: var(--hp-p1); }
+  #p2hp{ background: var(--hp-p2); margin-left:auto; }
+  #hud .vs{ font-weight:bold; font-size:20px; opacity:.7; }
+
+  #banner{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.55); font-size:clamp(24px,6vw,48px); font-weight:bold;
+    letter-spacing:2px; text-align:center; flex-direction:column; gap:14px;
+  }
+  #banner button{ font-size:16px; padding:8px 20px; border-radius:6px; border:none; cursor:pointer; background:#ffb347; font-weight:bold; }
+
+  #controls{ margin-top:10px; font-size:12px; opacity:.65; display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; width:100%; box-sizing:border-box; }
+  #controls div{ line-height:1.5; }
+
+  #setup{ margin-top:14px; font-size:12px; opacity:.55; border-top:1px dashed #444; padding-top:8px; width:100%; box-sizing:border-box; }
+</style>
+</head>
+<body>
+
+<div id="titleScreen">
+  <div id="titleContent">
+    <h1>TRONCHE DE CAKE</h1>
+    <p>Appuie sur ESPACE ou clique n'importe où pour commencer le combat</p>
+  </div>
+</div>
+
+<div id="wrap">
+  <div id="arena">
+    <div class="decor-missing-msg" id="decorMsg"></div>
+    <div class="fighter" id="p1"><img id="p1img" alt="P1"></div>
+    <div class="fighter facing-left" id="p2"><img id="p2img" alt="P2"></div>
+    <div id="banner">
+      <div id="bannerText"></div>
+      <button id="restartBtn">Rejouer</button>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div class="hpbox">
+      <div class="name">JOUEUR 1</div>
+      <div class="hpbar-outer"><div class="hpbar-inner" id="p1hp"></div></div>
+    </div>
+    <div class="vs">VS</div>
+    <div class="hpbox">
+      <div class="name" style="text-align:right;">JOUEUR 2</div>
+      <div class="hpbar-outer"><div class="hpbar-inner" id="p2hp"></div></div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div><b>Joueur 1</b><br>Q / D : se déplacer &nbsp; Z : sauter<br>F : coup de poing &nbsp; G : coup de pied &nbsp; H : spécial (tornade)</div>
+    <div style="text-align:right;"><b>Joueur 2</b><br>← / → : se déplacer &nbsp; ↑ : sauter<br>1 : coup de poing &nbsp; 2 : coup de pied &nbsp; 3 : spécial (mitraillette)</div>
+  </div>
+
+  <div id="setup">
+    Les images sont chargées automatiquement quel que soit leur format (.jfif, .jpg, .jpeg, .png, .webp) —
+    dépose juste le fichier avec le bon nom, pas besoin de convertir. Fond vert <code>#00FF00</code> pour Perso 1,
+    fond magenta <code>#FF00FF</code> pour Perso 2 (chroma-key retiré automatiquement).
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   NOMENCLATURE DES IMAGES ATTENDUES (même dossier que ce fichier html)
+   Peu importe l'extension : .jfif / .jpg / .jpeg / .png / .webp sont
+   toutes acceptées automatiquement, aucune conversion nécessaire.
+
+   Ecran d'accueil : titre        (ex: titre.jfif, titre.jpeg...)
+   Décor           : decor1
+
+   Perso 1 (fond vert #00FF00) :
+     perso1-idle, perso1-coup-de-poing, perso1-coup-de-pied,
+     perso1-special, perso1-touche, perso1-ko
+
+   Perso 2 (fond magenta #FF00FF) :
+     perso2-idle, perso2-coup-de-poing, perso2-coup-de-pied,
+     perso2-special, perso2-touche, perso2-ko
+   ========================================================= */
+
+const ASSET_PATH = ''; // ex: 'images/' si tes fichiers sont dans un sous-dossier
+const EXT_CANDIDATES = ['jfif','jpg','jpeg','png','webp'];
+const CHROMA_TOLERANCE = 90;
+const CHROMA_KEY = {
+  p1: { r:0, g:255, b:0 },     // vert pur
+  p2: { r:255, g:0, b:255 }    // magenta pur
+};
+
+const SPRITES = {
+  p1: {
+    idle: 'perso1-idle', punch: 'perso1-coup-de-poing', kick: 'perso1-coup-de-pied',
+    special: 'perso1-special', hit: 'perso1-touche', ko: 'perso1-ko'
+  },
+  p2: {
+    idle: 'perso2-idle', punch: 'perso2-coup-de-poing', kick: 'perso2-coup-de-pied',
+    special: 'perso2-special', hit: 'perso2-touche', ko: 'perso2-ko'
+  }
+};
+const DECOR_BASE = 'decor1';
+const TITLE_BASE = 'titre';
+
+// ---------- Résolution automatique de l'extension ----------
+function urlExists(url){
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+async function resolveUrl(baseName){
+  for(const ext of EXT_CANDIDATES){
+    const url = ASSET_PATH + baseName + '.' + ext;
+    if(await urlExists(url)) return url;
+  }
+  return null;
+}
+
+// ---------- Placeholder si l'image n'existe pas encore ----------
+function placeholderDataURL(label, color){
+  const c = document.createElement('canvas');
+  c.width = 200; c.height = 260;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = color; ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(label, c.width/2, c.height/2);
+  return c.toDataURL();
+}
+
+// ---------- Chargement + chroma-key ----------
+async function loadSpriteAuto(baseName, chromaColor, fallbackLabel, fallbackColor){
+  const url = await resolveUrl(baseName);
+  if(!url) return placeholderDataURL(fallbackLabel, fallbackColor);
+  return await new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try{
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img,0,0);
+        const data = ctx.getImageData(0,0,c.width,c.height);
+        const d = data.data;
+        for(let i=0;i<d.length;i+=4){
+          const dr = d[i]-chromaColor.r, dg = d[i+1]-chromaColor.g, db = d[i+2]-chromaColor.b;
+          if(Math.sqrt(dr*dr+dg*dg+db*db) < CHROMA_TOLERANCE){ d[i+3] = 0; }
+        }
+        ctx.putImageData(data,0,0);
+        resolve(c.toDataURL());
+      }catch(e){ resolve(placeholderDataURL(fallbackLabel, fallbackColor)); }
+    };
+    img.onerror = () => resolve(placeholderDataURL(fallbackLabel, fallbackColor));
+    img.src = url;
+  });
+}
+
+// ---------- Etat du jeu ----------
+const cache = { p1:{}, p2:{} };
+const state = {
+  p1: { x:15, hp:100, action:'idle', locked:false, ko:false, facing:1 },
+  p2: { x:75, hp:100, action:'idle', locked:false, ko:false, facing:-1 }
+};
+const SPEED = 1.4;
+const HIT_RANGE = 20;
+const DAMAGE = { punch:8, kick:12, special:20 };
+const ACTION_DURATION = { punch:260, kick:340, special:650, hit:260, ko:99999 };
+
+const el = {
+  p1: document.getElementById('p1'), p2: document.getElementById('p2'),
+  p1img: document.getElementById('p1img'), p2img: document.getElementById('p2img'),
+  p1hp: document.getElementById('p1hp'), p2hp: document.getElementById('p2hp'),
+  arena: document.getElementById('arena'),
+  banner: document.getElementById('banner'), bannerText: document.getElementById('bannerText'),
+  restartBtn: document.getElementById('restartBtn'), decorMsg: document.getElementById('decorMsg'),
+  titleScreen: document.getElementById('titleScreen')
+};
+
+async function preload(){
+  const colors = { p1:'#c0392b', p2:'#2980b9' };
+  for(const p of ['p1','p2']){
+    for(const [key, base] of Object.entries(SPRITES[p])){
+      cache[p][key] = await loadSpriteAuto(base, CHROMA_KEY[p], `${p} ${key}`, colors[p]);
+    }
+    setAction(p, 'idle');
+  }
+
+  // décor
+  const decorUrl = await resolveUrl(DECOR_BASE);
+  if(decorUrl){ el.arena.style.backgroundImage = `url(${decorUrl})`; }
+  else{
+    el.arena.classList.add('decor-missing');
+    el.decorMsg.textContent = `Ajoute "${DECOR_BASE}.jfif/.jpg/.png..." à côté du fichier html pour afficher le décor`;
+  }
+
+  // écran d'accueil
+  const titleUrl = await resolveUrl(TITLE_BASE);
+  if(titleUrl){ el.titleScreen.style.backgroundImage = `url(${titleUrl})`; el.titleScreen.style.backgroundSize = 'cover'; el.titleScreen.style.backgroundPosition = 'center'; }
+
+  render();
+}
+
+function setAction(p, action){
+  if(state[p].ko && action !== 'ko') return;
+  state[p].action = action;
+  el[p+'img'].src = cache[p][action];
+  el[p].classList.toggle('hit', action==='hit');
+  el[p].classList.toggle('ko', action==='ko');
+}
+
+function render(){
+  el.p1.style.left = state.p1.x + '%';
+  el.p2.style.left = state.p2.x + '%';
+  el.p1.classList.toggle('facing-left', state.p1.facing === -1);
+  el.p2.classList.toggle('facing-left', state.p2.facing === -1);
+  el.p1hp.style.width = Math.max(0,state.p1.hp) + '%';
+  el.p2hp.style.width = Math.max(0,state.p2.hp) + '%';
+}
+
+function distance(){ return Math.abs(state.p1.x - state.p2.x); }
+
+// ---------- Effets spéciaux ----------
+function spawnFX(className, leftPct, bottomPct, extraStyle, life){
+  const d = document.createElement('div');
+  d.className = className;
+  d.style.left = leftPct + '%';
+  d.style.bottom = bottomPct + '%';
+  if(extraStyle) Object.assign(d.style, extraStyle);
+  el.arena.appendChild(d);
+  setTimeout(() => d.remove(), life);
+}
+
+function shakeArena(){
+  el.arena.classList.remove('shake');
+  void el.arena.offsetWidth; // relance l'animation
+  el.arena.classList.add('shake');
+  setTimeout(() => el.arena.classList.remove('shake'), 400);
+}
+
+function specialFX(attacker, defender){
+  shakeArena();
+  const a = state[attacker], d = state[defender];
+  if(attacker === 'p1'){
+    // Démon : tornade tournoyante autour de lui
+    spawnFX('fx-tornado', a.x - 5, 4, null, 900);
+  } else {
+    // T-Rex : éclair de bouche + trajectoire de balles + impact
+    spawnFX('fx-muzzle', a.x + (a.facing === 1 ? 10 : -6), 38, null, 300);
+    const left = Math.min(a.x, d.x) + 6;
+    const width = Math.max(4, Math.abs(d.x - a.x) - 8);
+    spawnFX('fx-bullet', left, 41, { width: width + '%' }, 200);
+    setTimeout(() => spawnFX('fx-spark', d.x - 4, 30, null, 350), 100);
+  }
+}
+
+// ---------- Combat ----------
+function attack(attacker, defender, type){
+  const a = state[attacker];
+  if(a.locked || a.ko || state[defender].ko) return;
+  a.locked = true;
+  setAction(attacker, type);
+  if(type === 'special') specialFX(attacker, defender);
+  setTimeout(() => {
+    if(distance() <= HIT_RANGE && !state[defender].ko){ applyDamage(defender, DAMAGE[type]); }
+  }, ACTION_DURATION[type]*0.35);
+  setTimeout(() => {
+    a.locked = false;
+    if(!a.ko) setAction(attacker, 'idle');
+  }, ACTION_DURATION[type]);
+}
+
+function applyDamage(defender, dmg){
+  const d = state[defender];
+  d.hp -= dmg;
+  render();
+  if(d.hp <= 0){
+    d.hp = 0; d.ko = true;
+    setAction(defender, 'ko');
+    endRound(defender === 'p1' ? 'p2' : 'p1');
+    return;
+  }
+  const wasLocked = d.locked;
+  d.locked = true;
+  setAction(defender, 'hit');
+  setTimeout(() => { if(!d.ko){ d.locked = wasLocked; if(!wasLocked) setAction(defender,'idle'); } }, ACTION_DURATION.hit);
+}
+
+function endRound(winner){
+  el.banner.style.display = 'flex';
+  el.bannerText.textContent = (winner === 'p1' ? 'JOUEUR 1' : 'JOUEUR 2') + ' GAGNE !';
+}
+
+function resetGame(){
+  state.p1 = { x:15, hp:100, action:'idle', locked:false, ko:false, facing:1 };
+  state.p2 = { x:75, hp:100, action:'idle', locked:false, ko:false, facing:-1 };
+  setAction('p1','idle'); setAction('p2','idle');
+  el.banner.style.display = 'none';
+  render();
+}
+el.restartBtn.addEventListener('click', resetGame);
+
+// ---------- Ecran d'accueil ----------
+function startGame(){ el.titleScreen.style.display = 'none'; }
+el.titleScreen.addEventListener('click', startGame);
+document.addEventListener('keydown', e => {
+  if(e.key === ' ' && el.titleScreen.style.display !== 'none'){ e.preventDefault(); startGame(); }
+});
+
+// ---------- Contrôles ----------
+const keys = new Set();
+document.addEventListener('keydown', e => keys.add(e.key.toLowerCase()));
+document.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+let lastAttackKey = { punch1:false, kick1:false, special1:false, punch2:false, kick2:false, special2:false };
+
+function loop(){
+  const p1 = state.p1, p2 = state.p2;
+
+  if(!p1.locked && !p1.ko){
+    if(keys.has('q')){ p1.x = Math.max(2, p1.x - SPEED); p1.facing = -1; setAction('p1','idle'); }
+    else if(keys.has('d')){ p1.x = Math.min(78, p1.x + SPEED); p1.facing = 1; setAction('p1','idle'); }
+  }
+  if(!p2.locked && !p2.ko){
+    if(keys.has('arrowleft')){ p2.x = Math.max(22, p2.x - SPEED); p2.facing = -1; setAction('p2','idle'); }
+    else if(keys.has('arrowright')){ p2.x = Math.min(96, p2.x + SPEED); p2.facing = 1; setAction('p2','idle'); }
+  }
+
+  if(keys.has('f') && !lastAttackKey.punch1){ attack('p1','p2','punch'); }
+  if(keys.has('g') && !lastAttackKey.kick1){ attack('p1','p2','kick'); }
+  if(keys.has('h') && !lastAttackKey.special1){ attack('p1','p2','special'); }
+  if(keys.has('1') && !lastAttackKey.punch2){ attack('p2','p1','punch'); }
+  if(keys.has('2') && !lastAttackKey.kick2){ attack('p2','p1','kick'); }
+  if(keys.has('3') && !lastAttackKey.special2){ attack('p2','p1','special'); }
+
+  lastAttackKey = {
+    punch1:keys.has('f'), kick1:keys.has('g'), special1:keys.has('h'),
+    punch2:keys.has('1'), kick2:keys.has('2'), special2:keys.has('3')
+  };
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+preload().then(() => { requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
