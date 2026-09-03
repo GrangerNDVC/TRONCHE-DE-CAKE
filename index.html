@@ -44,6 +44,7 @@
     animation: pulseText 1.4s ease-in-out infinite;
   }
   @keyframes pulseText{ 0%,100%{opacity:.45;} 50%{opacity:1;} }
+  #titleContent p.loading{ animation:none; opacity:.7; }
 
   /* ---------- ARENE ---------- */
   #arena{
@@ -78,7 +79,7 @@
     transition: opacity .5s ease;
   }
   .fighter-name.hidden{ opacity:0; }
-  .name-demon{
+  .name-diablo{
     font-family: Georgia, 'Times New Roman', serif;
     font-weight:900; font-style:italic;
     color:#ffcc33;
@@ -89,14 +90,14 @@
     0%,100%{ opacity:1; text-shadow:0 0 8px #ff2200, 0 0 18px #ff2200, 0 2px 2px #000; }
     50%{ opacity:.85; text-shadow:0 0 14px #ff5500, 0 0 28px #ff5500, 0 2px 2px #000; }
   }
-  .name-trex{
-    font-family: 'Courier New', monospace;
-    font-weight:900; letter-spacing:2px;
-    color:#c6ff4d;
-    text-shadow:0 0 6px #7cff2b, 0 0 14px #7cff2b, 2px 2px 0 #000;
-    animation: punkShake .16s steps(2) infinite;
+  .name-rambo{
+    font-family: 'Arial Black', Impact, 'Haettenschweiler', sans-serif;
+    font-weight:900; letter-spacing:3px; text-transform:uppercase;
+    color:#ff3018;
+    text-shadow: 2px 2px 0 #1a0000, -1px -1px 0 #1a0000, 0 0 10px #ff2b1a, 0 0 24px #a30000, 3px 3px 3px rgba(0,0,0,.85);
+    animation: angryShake .18s steps(2) infinite;
   }
-  @keyframes punkShake{ 0%{transform:translateX(-50%) skewX(-3deg);} 50%{transform:translateX(-50%) skewX(3deg);} 100%{transform:translateX(-50%) skewX(-3deg);} }
+  @keyframes angryShake{ 0%{transform:translateX(-50%) rotate(-1.6deg) scale(1);} 50%{transform:translateX(-50%) rotate(1.6deg) scale(1.03);} 100%{transform:translateX(-50%) rotate(-1.6deg) scale(1);} }
 
   /* ---------- COMPTE A REBOURS ---------- */
   #countdown{
@@ -205,15 +206,15 @@
 <div id="titleScreen">
   <div id="titleContent">
     <h1>TRONCHE DE CAKE</h1>
-    <p>Appuie sur ESPACE ou clique n'importe où pour commencer le combat</p>
+    <p id="titleHint" class="loading">Chargement…</p>
   </div>
 </div>
 
 <div id="wrap">
   <div id="arena">
     <div class="decor-missing-msg" id="decorMsg"></div>
-    <div class="fighter-name name-demon" id="p1name"></div>
-    <div class="fighter-name name-trex" id="p2name"></div>
+    <div class="fighter-name name-diablo" id="p1name"></div>
+    <div class="fighter-name name-rambo" id="p2name"></div>
     <div id="countdown"></div>
     <div class="fighter" id="p1"><img id="p1img" alt="P1"><div class="hit-flash" id="p1flash"></div></div>
     <div class="fighter facing-left" id="p2"><img id="p2img" alt="P2"><div class="hit-flash" id="p2flash"></div></div>
@@ -304,7 +305,7 @@ const CHROMA_KEY = {
 };
 
 // Noms affichés au dessus de chaque perso avant le combat — modifie librement ici
-const NAMES = { p1: 'DÉMON DES FLAMMES', p2: 'T-REX PUNK' };
+const NAMES = { p1: 'EL DIABLO', p2: 'RAMBO REX' };
 
 const SPRITES = {
   p1: {
@@ -337,6 +338,30 @@ async function resolveUrl(baseName){
   }
   return null;
 }
+
+// Comme resolveUrl, mais garde l'image déjà décodée en mémoire pour éviter de la re-télécharger
+// une 2e fois lors du détourage (gain important sur les photos lourdes / mobile).
+function loadImageObj(url){
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+async function resolveImage(baseName){
+  for(const ext of EXT_CANDIDATES){
+    const url = ASSET_PATH + baseName + '.' + ext;
+    const img = await loadImageObj(url);
+    if(img) return img;
+  }
+  return null;
+}
+
+// Taille max de traitement : les persos s'affichent au maximum à 220px de large dans le jeu,
+// donc inutile de faire le détourage pixel par pixel sur une photo de 4000px — ça ralentit
+// énormément le chargement pour rien. On redimensionne d'abord.
+const MAX_SPRITE_DIM = 700;
 
 // ---------- Résolution automatique de l'extension audio ----------
 function audioExists(url){
@@ -408,60 +433,58 @@ function placeholderDataURL(label, color){
 // ---------- Détourage chroma-key avec dégradé + anti-spill ----------
 function isGreenKey(chromaColor){ return chromaColor.g > chromaColor.r && chromaColor.g > chromaColor.b; }
 
-function processChroma(url, chromaColor){
+function processChroma(preloadedImg, chromaColor){
   return new Promise(resolve => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try{
-        const c = document.createElement('canvas');
-        c.width = img.naturalWidth; c.height = img.naturalHeight;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(img,0,0);
-        const data = ctx.getImageData(0,0,c.width,c.height);
-        const d = data.data;
-        const greenKey = isGreenKey(chromaColor);
-        for(let i=0;i<d.length;i+=4){
-          const r=d[i], g=d[i+1], b=d[i+2];
-          // "dominance" de la couleur de fond sur ce pixel
-          const dom = greenKey ? (g - Math.max(r,b)) : (Math.min(r,b) - g);
-          if(dom >= CHROMA_HIGH){
-            d[i+3] = 0; // totalement transparent
-          } else if(dom > CHROMA_LOW){
-            // zone de bord : dégradé de transparence + suppression du "spill" (halo coloré résiduel)
-            const alpha = 255 * (CHROMA_HIGH - dom) / (CHROMA_HIGH - CHROMA_LOW);
-            d[i+3] = Math.round(Math.min(d[i+3], alpha));
-            if(greenKey){
-              if(d[i+1] > Math.max(d[i], d[i+2])) d[i+1] = Math.max(d[i], d[i+2]);
-            } else {
-              const cap = Math.max(d[i+1], Math.min(d[i], d[i+2]));
-              if(d[i] > cap) d[i] = cap;
-              if(d[i+2] > cap) d[i+2] = cap;
-            }
+    try{
+      const img = preloadedImg;
+      const scale = Math.min(1, MAX_SPRITE_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h); // redimensionnement ici : divise le travail pixel par pixel d'autant
+      const data = ctx.getImageData(0,0,c.width,c.height);
+      const d = data.data;
+      const greenKey = isGreenKey(chromaColor);
+      for(let i=0;i<d.length;i+=4){
+        const r=d[i], g=d[i+1], b=d[i+2];
+        // "dominance" de la couleur de fond sur ce pixel
+        const dom = greenKey ? (g - Math.max(r,b)) : (Math.min(r,b) - g);
+        if(dom >= CHROMA_HIGH){
+          d[i+3] = 0; // totalement transparent
+        } else if(dom > CHROMA_LOW){
+          // zone de bord : dégradé de transparence + suppression du "spill" (halo coloré résiduel)
+          const alpha = 255 * (CHROMA_HIGH - dom) / (CHROMA_HIGH - CHROMA_LOW);
+          d[i+3] = Math.round(Math.min(d[i+3], alpha));
+          if(greenKey){
+            if(d[i+1] > Math.max(d[i], d[i+2])) d[i+1] = Math.max(d[i], d[i+2]);
+          } else {
+            const cap = Math.max(d[i+1], Math.min(d[i], d[i+2]));
+            if(d[i] > cap) d[i] = cap;
+            if(d[i+2] > cap) d[i+2] = cap;
           }
-          // sinon (dom <= LOW) : pixel considéré comme faisant partie du perso, inchangé
         }
-        ctx.putImageData(data,0,0);
-        resolve(c.toDataURL());
-      }catch(e){ resolve(null); }
-    };
-    img.onerror = () => resolve(null);
-    img.src = url;
+        // sinon (dom <= LOW) : pixel considéré comme faisant partie du perso, inchangé
+      }
+      ctx.putImageData(data,0,0);
+      resolve(c.toDataURL());
+    }catch(e){ resolve(null); }
   });
 }
 
 async function loadSpriteAuto(baseName, chromaColor, fallbackLabel, fallbackColor){
-  const url = await resolveUrl(baseName);
-  if(!url) return placeholderDataURL(fallbackLabel, fallbackColor);
-  const processed = await processChroma(url, chromaColor);
+  const img = await resolveImage(baseName);
+  if(!img) return placeholderDataURL(fallbackLabel, fallbackColor);
+  const processed = await processChroma(img, chromaColor);
   return processed || placeholderDataURL(fallbackLabel, fallbackColor);
 }
 
 // sprite optionnel : retourne null si absent, PAS de placeholder (aucun changement de comportement si non fourni)
 async function loadOptionalSprite(baseName, chromaColor){
-  const url = await resolveUrl(baseName);
-  if(!url) return null;
-  return await processChroma(url, chromaColor);
+  const img = await resolveImage(baseName);
+  if(!img) return null;
+  return await processChroma(img, chromaColor);
 }
 
 // ---------- Etat du jeu ----------
@@ -494,20 +517,50 @@ const el = {
   titleScreen: document.getElementById('titleScreen'),
   p1name: document.getElementById('p1name'), p2name: document.getElementById('p2name'),
   countdown: document.getElementById('countdown'),
-  p1flash: document.getElementById('p1flash'), p2flash: document.getElementById('p2flash')
+  p1flash: document.getElementById('p1flash'), p2flash: document.getElementById('p2flash'),
+  titleHint: document.getElementById('titleHint')
 };
+let assetsReady = false;
 
 async function preload(){
   const colors = { p1:'#c0392b', p2:'#2980b9' };
+  const spriteKeys = ['idle','punch','kick','special','hit','ko'];
+  const totalSteps = (spriteKeys.length + 2) * 2; // 6 obligatoires + 2 optionnelles, x2 persos
+  let done = 0;
+  function bump(){
+    done++;
+    if(el.titleHint) el.titleHint.textContent = `Chargement des images… ${Math.min(done,totalSteps)}/${totalSteps}`;
+  }
+
+  // Chargement en parallèle (au lieu de séquentiel) : réduit fortement le temps d'attente total,
+  // surtout utile si certaines images sont volumineuses (photos).
+  const tasks = [];
   for(const p of ['p1','p2']){
-    for(const key of ['idle','punch','kick','special','hit','ko']){
-      cache[p][key] = await loadSpriteAuto(SPRITES[p][key], CHROMA_KEY[p], `${p} ${key}`, colors[p]);
+    for(const key of spriteKeys){
+      tasks.push((async () => {
+        cache[p][key] = await loadSpriteAuto(SPRITES[p][key], CHROMA_KEY[p], `${p} ${key}`, colors[p]);
+        bump();
+      })());
     }
-    const walkImg = await loadOptionalSprite(SPRITES[p].walk, CHROMA_KEY[p]);
-    if(walkImg){ cache[p].walk = walkImg; available[p].walk = true; }
-    const jumpImg = await loadOptionalSprite(SPRITES[p].jump, CHROMA_KEY[p]);
-    if(jumpImg){ cache[p].jump = jumpImg; available[p].jump = true; }
-    setAction(p, 'idle');
+    tasks.push((async () => {
+      const walkImg = await loadOptionalSprite(SPRITES[p].walk, CHROMA_KEY[p]);
+      if(walkImg){ cache[p].walk = walkImg; available[p].walk = true; }
+      bump();
+    })());
+    tasks.push((async () => {
+      const jumpImg = await loadOptionalSprite(SPRITES[p].jump, CHROMA_KEY[p]);
+      if(jumpImg){ cache[p].jump = jumpImg; available[p].jump = true; }
+      bump();
+    })());
+  }
+  await Promise.all(tasks);
+
+  // 🔧 Affichage initial : on force l'affectation de l'image de pose "idle" directement,
+  // car setAction() ignore l'appel si state.action vaut déjà "idle" (ce qui est le cas par
+  // défaut) — sans ce contournement, le perso restait invisible tant qu'aucune action
+  // (attaque/déplacement) n'avait eu lieu.
+  for(const p of ['p1','p2']){
+    el[p+'img'].src = cache[p].idle;
   }
 
   // décor
@@ -530,6 +583,12 @@ async function preload(){
   musicUrls.decor1 = await resolveAudioUrl(SOUND_FILES.decorMusic.decor1);
   for(const key of ['punch','kick','special_p1','special_p2','hit','crit','ko','victory']){
     sfxUrls[key] = await resolveAudioUrl(SOUND_FILES[key]);
+  }
+
+  assetsReady = true;
+  if(el.titleHint){
+    el.titleHint.textContent = "Appuie sur ESPACE ou clique n'importe où pour commencer le combat";
+    el.titleHint.classList.remove('loading');
   }
 
   render();
@@ -765,6 +824,7 @@ function runCountdown(){
 
 // ---------- Ecran d'accueil ----------
 function startGame(){
+  if(!assetsReady) return; // évite de lancer le combat avant que les sprites soient prêts (cause du bug "perso invisible")
   el.titleScreen.style.display = 'none';
   runCountdown(); // coupe la musique de titre et lance la musique de combat à la fin
 }
