@@ -244,7 +244,9 @@
     Les images sont chargées automatiquement quel que soit leur format (.jfif, .jpg, .jpeg, .png, .webp) —
     dépose juste le fichier avec le bon nom, pas besoin de convertir. Fond vert <code>#00FF00</code> pour Perso 1,
     fond magenta <code>#FF00FF</code> pour Perso 2 (chroma-key retiré automatiquement).
-    La marche et le saut ne s'activent que si les images <code>perso-marche</code> / <code>perso-saut</code> existent.
+    La marche et le saut ne s'activent que si les images <code>perso-marche</code> / <code>perso-saut</code> existent.<br>
+    Les sons (musiques + bruitages) suivent le même principe : dépose les fichiers audio à côté de ce fichier html
+    (.mp3, .ogg, .wav ou .m4a, extension détectée automatiquement) — le jeu fonctionne aussi sans eux.
   </div>
 </div>
 
@@ -272,6 +274,25 @@
 
 const ASSET_PATH = ''; // ex: 'images/' si tes fichiers sont dans un sous-dossier
 const EXT_CANDIDATES = ['jfif','jpg','jpeg','png','webp'];
+const AUDIO_EXT_CANDIDATES = ['mp3','ogg','wav','m4a'];
+
+/* ---------- NOMENCLATURE DES SONS (même dossier que ce fichier html) ----------
+   Comme pour les images : peu importe l'extension (.mp3/.ogg/.wav/.m4a),
+   résolution automatique. Dépose juste le fichier avec le bon nom.
+   Les noms ci-dessous correspondent exactement aux fichiers déjà fournis. */
+const SOUND_FILES = {
+  titleMusic: 'musique-titre',          // boucle sur l'écran d'accueil
+  decorMusic: { decor1: 'musique1' },   // musique liée à chaque décor (1 décor = 1 musique)
+  punch: 'coup_de_poing',
+  kick: 'coup_de_pied',
+  special_p1: 'tourbillon_coup_special_el_diablo',   // spécial Démon des Flammes
+  special_p2: 'mitraillette_coup_special_t-rex',     // spécial T-Rex Punk
+  hit: 'Cri_de_douleur',
+  crit: 'coup_critique',
+  ko: 'game-over',
+  victory: 'you-win'
+};
+// musique2 fournie mais pas encore utilisée : réservée pour un futur 2e décor.
 
 // Seuils de détourage (chroma-key) : en dessous de LOW = opaque, au dessus de HIGH = transparent, entre les deux = dégradé + anti-spill
 const CHROMA_LOW = 12;
@@ -315,6 +336,61 @@ async function resolveUrl(baseName){
     if(await urlExists(url)) return url;
   }
   return null;
+}
+
+// ---------- Résolution automatique de l'extension audio ----------
+function audioExists(url){
+  return new Promise(resolve => {
+    const a = new Audio();
+    let done = false;
+    const finish = ok => { if(!done){ done = true; resolve(ok); } };
+    a.oncanplaythrough = () => finish(true);
+    a.onerror = () => finish(false);
+    a.src = url;
+    a.load();
+    setTimeout(() => finish(false), 3000); // sécurité si l'évènement ne se déclenche jamais
+  });
+}
+async function resolveAudioUrl(baseName){
+  for(const ext of AUDIO_EXT_CANDIDATES){
+    const url = ASSET_PATH + baseName + '.' + ext;
+    if(await audioExists(url)) return url;
+  }
+  return null;
+}
+
+// ---------- Lecture audio ----------
+const sfxUrls = {};        // bruitages ponctuels (peuvent se superposer)
+const musicUrls = {};      // musiques de fond (titre + par décor)
+let currentMusic = null;
+let audioUnlocked = false;
+
+function playSFX(key, volume){
+  const url = sfxUrls[key];
+  if(!url) return; // son pas encore fourni, on ignore silencieusement (comme pour les sprites optionnels)
+  const a = new Audio(url);
+  a.volume = (volume === undefined) ? 0.7 : volume;
+  a.play().catch(() => {}); // ignore si bloqué par la politique autoplay
+}
+
+function playMusic(url, volume){
+  if(currentMusic){ currentMusic.pause(); currentMusic = null; }
+  if(!url) return;
+  const a = new Audio(url);
+  a.loop = true;
+  a.volume = (volume === undefined) ? 0.32 : volume;
+  a.play().catch(() => {});
+  currentMusic = a;
+}
+
+function stopMusic(){
+  if(currentMusic){ currentMusic.pause(); currentMusic = null; }
+}
+
+// tente de débloquer/relancer l'audio à la première interaction utilisateur (politique navigateur)
+function unlockAudioOnce(){
+  if(audioUnlocked) return;
+  audioUnlocked = true;
 }
 
 // ---------- Placeholder si l'image n'existe pas encore ----------
@@ -449,6 +525,13 @@ async function preload(){
   el.p1name.textContent = NAMES.p1;
   el.p2name.textContent = NAMES.p2;
 
+  // ---------- Sons (optionnels : le jeu fonctionne sans, comme les sprites) ----------
+  musicUrls.title = await resolveAudioUrl(SOUND_FILES.titleMusic);
+  musicUrls.decor1 = await resolveAudioUrl(SOUND_FILES.decorMusic.decor1);
+  for(const key of ['punch','kick','special_p1','special_p2','hit','crit','ko','victory']){
+    sfxUrls[key] = await resolveAudioUrl(SOUND_FILES[key]);
+  }
+
   render();
 }
 
@@ -554,7 +637,12 @@ function attack(attacker, defender, type){
   if(a.locked || a.ko || state[defender].ko) return;
   a.locked = true;
   setAction(attacker, type);
-  if(type === 'special') specialFX(attacker, defender);
+  if(type === 'special'){
+    specialFX(attacker, defender);
+    playSFX(attacker === 'p1' ? 'special_p1' : 'special_p2', 0.65);
+  } else {
+    playSFX(type, 0.7); // 'punch' ou 'kick'
+  }
   setTimeout(() => {
     if(distance() <= HIT_RANGE && !state[defender].ko){
       const now = performance.now();
@@ -581,12 +669,15 @@ function applyDamage(defender, dmg, meta){
 
   triggerHitFlash(defender, meta.isCrit);
   spawnFloatingText('-' + dmg, d.x + 11, 55, meta.isCrit ? 'crit' : 'dmg');
-  if(meta.isCrit){ spawnFloatingText('CRITIQUE !', d.x + 11, 68, 'crit'); shakeArena(); }
+  if(meta.isCrit){ spawnFloatingText('CRITIQUE !', d.x + 11, 68, 'crit'); shakeArena(); playSFX('crit', 0.8); }
   else if(meta.combo >= 2){ spawnFloatingText('COMBO x' + meta.combo, d.x + 11, 68, 'combo'); }
+  playSFX('hit', 0.55);
 
   if(d.hp <= 0){
     d.hp = 0; d.ko = true;
     setAction(defender, 'ko');
+    stopMusic();
+    playSFX('ko', 0.85);
     endRound(defender === 'p1' ? 'p2' : 'p1');
     return;
   }
@@ -599,6 +690,7 @@ function applyDamage(defender, dmg, meta){
 function endRound(winner){
   el.banner.style.display = 'flex';
   el.bannerText.textContent = (winner === 'p1' ? 'JOUEUR 1' : 'JOUEUR 2') + ' GAGNE !';
+  setTimeout(() => playSFX('victory', 0.8), 500); // petit délai pour ne pas couvrir le son de K.O.
 }
 
 function resetGame(){
@@ -646,6 +738,7 @@ function playGong(){
 
 // ---------- Compte à rebours avant le combat ----------
 function runCountdown(){
+  stopMusic(); // coupe la musique d'accueil pendant le décompte
   const seq = ['3','2','1','COMBAT !'];
   el.countdown.style.display = 'flex';
   let i = 0;
@@ -663,6 +756,7 @@ function runCountdown(){
         el.p1name.classList.add('hidden');
         el.p2name.classList.add('hidden');
         fightStarted = true;
+        playMusic(musicUrls.decor1, 0.3); // musique du décor associé au combat
       }, 650);
     }
   }
@@ -672,7 +766,7 @@ function runCountdown(){
 // ---------- Ecran d'accueil ----------
 function startGame(){
   el.titleScreen.style.display = 'none';
-  runCountdown();
+  runCountdown(); // coupe la musique de titre et lance la musique de combat à la fin
 }
 el.titleScreen.addEventListener('click', startGame);
 document.addEventListener('keydown', e => {
@@ -724,7 +818,10 @@ function loop(){
   requestAnimationFrame(loop);
 }
 
-preload().then(() => { requestAnimationFrame(loop); });
+preload().then(() => {
+  playMusic(musicUrls.title, 0.3); // best-effort : certains navigateurs bloquent tant qu'il n'y a pas eu de clic
+  requestAnimationFrame(loop);
+});
 </script>
 </body>
 </html>
