@@ -319,12 +319,14 @@ const SPRITES = {
   p1: {
     idle: 'perso1-idle', punch: 'perso1-coup-de-poing', kick: 'perso1-coup-de-pied',
     special: 'perso1-special', hit: 'perso1-touche', ko: 'perso1-ko',
-    walk: 'perso1-marche', jump: 'perso1-saut', defense: 'perso1-defense'
+    walk: 'perso1-marche', walk2: 'perso1-marche2', walk3: 'perso1-marche3',
+    jump: 'perso1-saut', defense: 'perso1-defense'
   },
   p2: {
     idle: 'perso2-idle', punch: 'perso2-coup-de-poing', kick: 'perso2-coup-de-pied',
     special: 'perso2-special', hit: 'perso2-touche', ko: 'perso2-ko',
-    walk: 'perso2-marche', jump: 'perso2-saut', defense: 'perso2-defense'
+    walk: 'perso2-marche', walk2: 'perso2-marche2', walk3: 'perso2-marche3',
+    jump: 'perso2-saut', defense: 'perso2-defense'
   }
 };
 const DECOR_BASE = 'decor1';
@@ -497,14 +499,15 @@ async function loadOptionalSprite(baseName, chromaColor){
 
 // ---------- Etat du jeu ----------
 const cache = { p1:{}, p2:{} };
-const available = { p1:{ walk:false, jump:false, defense:false }, p2:{ walk:false, jump:false, defense:false } };
+const available = { p1:{ walk:false, walkCycle:false, jump:false, defense:false }, p2:{ walk:false, walkCycle:false, jump:false, defense:false } };
 function freshFighterState(x, facing){
   return {
     x, hp:100, action:'idle', locked:false, ko:false, facing, jumping:false,
     comboCount:0, lastComboTime:0,      // combo de dégâts (coups enchaînés rapprochés)
     inputHistory:[],                    // historique des coups pour détecter la combinaison spéciale
     defending:false,                    // en garde (touche H / 3 maintenue)
-    blockedCount:0                      // nb de coups parés cette manche (pour le score)
+    blockedCount:0,                     // nb de coups parés cette manche (pour le score)
+    walkFrameIndex:0, lastWalkFrameTime:0 // position dans le cycle d'animation de marche
   };
 }
 const state = {
@@ -530,6 +533,8 @@ const COMBO_WINDOW = 1400;         // ms : délai max entre deux coups pour que 
 const COMBO_BONUS_PER_HIT = 0.15;  // +15% de dégâts par coup enchaîné
 const COMBO_BONUS_MAX = 0.6;       // plafond du bonus combo (+60%)
 const BLOCK_DAMAGE_MULT = 0.5;     // dégâts divisés par 2 quand la défense est active
+const WALK_SEQUENCE = ['walk','walk2','walk3','walk2']; // cycle d'animation : contact / passage / contact opposé / passage, en boucle
+const WALK_FRAME_INTERVAL = 130;   // ms entre chaque frame du cycle de marche
 
 // ---------- Combinaisons déclenchant le coup spécial (façon jeu de combat classique) ----------
 // 3 coups dans le bon ordre en moins de COMBO_INPUT_WINDOW ms déclenchent automatiquement le spécial,
@@ -560,7 +565,7 @@ let assetsReady = false;
 async function preload(){
   const colors = { p1:'#c0392b', p2:'#2980b9' };
   const spriteKeys = ['idle','punch','kick','special','hit','ko'];
-  const totalSteps = (spriteKeys.length + 3) * 2; // 6 obligatoires + 3 optionnelles (marche/saut/défense), x2 persos
+  const totalSteps = (spriteKeys.length + 5) * 2; // 6 obligatoires + 5 optionnelles (marche/marche2/marche3/saut/défense), x2 persos
   let done = 0;
   function bump(){
     done++;
@@ -583,6 +588,16 @@ async function preload(){
       bump();
     })());
     tasks.push((async () => {
+      const walk2Img = await loadOptionalSprite(SPRITES[p].walk2, CHROMA_KEY[p]);
+      if(walk2Img){ cache[p].walk2 = walk2Img; }
+      bump();
+    })());
+    tasks.push((async () => {
+      const walk3Img = await loadOptionalSprite(SPRITES[p].walk3, CHROMA_KEY[p]);
+      if(walk3Img){ cache[p].walk3 = walk3Img; }
+      bump();
+    })());
+    tasks.push((async () => {
       const jumpImg = await loadOptionalSprite(SPRITES[p].jump, CHROMA_KEY[p]);
       if(jumpImg){ cache[p].jump = jumpImg; available[p].jump = true; }
       bump();
@@ -594,6 +609,11 @@ async function preload(){
     })());
   }
   await Promise.all(tasks);
+  for(const p of ['p1','p2']){
+    // le cycle complet (3 frames animées) n'est actif que si les 3 images sont présentes ;
+    // sinon on garde le comportement précédent (une seule pose de marche fixe, ou idle si rien du tout).
+    available[p].walkCycle = !!(cache[p].walk && cache[p].walk2 && cache[p].walk3);
+  }
 
   // 🔧 Affichage initial : on force l'affectation de l'image de pose "idle" directement,
   // car setAction() ignore l'appel si state.action vaut déjà "idle" (ce qui est le cas par
@@ -945,6 +965,24 @@ function triggerAttackWithCombo(attacker, defender, type){
   }
 }
 
+// Fait avancer/rembobine l'animation de marche (cycle 1-2-3-2 si les 3 frames sont dispo,
+// sinon retombe sur une seule pose fixe comme avant, sinon sur idle si rien n'est fourni).
+function updateWalkAnimation(p){
+  const st = state[p];
+  if(!available[p].walk){ setAction(p, 'idle'); return; }
+  if(!available[p].walkCycle){ setAction(p, 'walk'); return; }
+  const now = performance.now();
+  if(now - st.lastWalkFrameTime > WALK_FRAME_INTERVAL){
+    st.walkFrameIndex = (st.walkFrameIndex + 1) % WALK_SEQUENCE.length;
+    st.lastWalkFrameTime = now;
+  }
+  setAction(p, WALK_SEQUENCE[st.walkFrameIndex]);
+}
+function resetWalkAnimation(p){
+  state[p].walkFrameIndex = 0;
+  state[p].lastWalkFrameTime = 0;
+}
+
 function loop(){
   const p1 = state.p1, p2 = state.p2;
 
@@ -956,9 +994,9 @@ function loop(){
         setAction('p1', available.p1.defense ? 'defense' : 'idle');
       } else {
         p1.defending = false;
-        if(keys.has('q')){ p1.x = Math.max(2, p1.x - SPEED); p1.facing = -1; setAction('p1', available.p1.walk ? 'walk' : 'idle'); }
-        else if(keys.has('d')){ p1.x = Math.min(p2.x - MIN_GAP, p1.x + SPEED); p1.facing = 1; setAction('p1', available.p1.walk ? 'walk' : 'idle'); }
-        else{ setAction('p1','idle'); }
+        if(keys.has('q')){ p1.x = Math.max(2, p1.x - SPEED); p1.facing = -1; updateWalkAnimation('p1'); }
+        else if(keys.has('d')){ p1.x = Math.min(p2.x - MIN_GAP, p1.x + SPEED); p1.facing = 1; updateWalkAnimation('p1'); }
+        else{ resetWalkAnimation('p1'); setAction('p1','idle'); }
       }
     }
     const wantDefend2 = keys.has('3');
@@ -968,9 +1006,9 @@ function loop(){
         setAction('p2', available.p2.defense ? 'defense' : 'idle');
       } else {
         p2.defending = false;
-        if(keys.has('arrowleft')){ p2.x = Math.max(p1.x + MIN_GAP, p2.x - SPEED); p2.facing = -1; setAction('p2', available.p2.walk ? 'walk' : 'idle'); }
-        else if(keys.has('arrowright')){ p2.x = Math.min(96, p2.x + SPEED); p2.facing = 1; setAction('p2', available.p2.walk ? 'walk' : 'idle'); }
-        else{ setAction('p2','idle'); }
+        if(keys.has('arrowleft')){ p2.x = Math.max(p1.x + MIN_GAP, p2.x - SPEED); p2.facing = -1; updateWalkAnimation('p2'); }
+        else if(keys.has('arrowright')){ p2.x = Math.min(96, p2.x + SPEED); p2.facing = 1; updateWalkAnimation('p2'); }
+        else{ resetWalkAnimation('p2'); setAction('p2','idle'); }
       }
     }
 
